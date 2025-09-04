@@ -4,7 +4,7 @@ from my_db_utils import init_db, save_trades_to_db, load_trades_from_db
 from dashboard import compute_metrics
 
 def test_db():
-    init_db()
+    init_db(clear=True)  # Clear database before test
     df = pd.DataFrame({
         'symbol': ['PYRUSDT'],
         'trade_num': [1],
@@ -31,7 +31,7 @@ def test_trade_processing():
         'Position size (qty)': [1.0, 1.0],
         'Position size (value)': [10000.0, 10000.0],
         'Net P&L USDT': [0.0, 100.0],
-        'Symbol': ['PYRUSDT']
+        'Symbol': ['PYRUSDT', 'PYRUSDT']
     })
     trades_list = []
     skipped_trades = []
