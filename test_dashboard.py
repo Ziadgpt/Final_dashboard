@@ -1,6 +1,7 @@
 import pytest
 import pandas as pd
 from my_db_utils import init_db, save_trades_to_db, load_trades_from_db
+from dashboard import compute_metrics
 
 def test_db():
     init_db()
@@ -29,7 +30,8 @@ def test_trade_processing():
         'Price USDT': [10000.0, 10100.0],
         'Position size (qty)': [1.0, 1.0],
         'Position size (value)': [10000.0, 10000.0],
-        'Net P&L USDT': [0.0, 100.0]
+        'Net P&L USDT': [0.0, 100.0],
+        'Symbol': ['PYRUSDT']
     })
     trades_list = []
     skipped_trades = []
@@ -45,3 +47,20 @@ def test_trade_processing():
             skipped_trades.append((trade_num, f"Error: {str(e)}"))
     assert len(trades_list) == 1
     assert len(skipped_trades) == 0
+
+def test_metrics():
+    df = pd.DataFrame({
+        'symbol': ['PYRUSDT'],
+        'entry_price': [10000.0],
+        'exit_price': [10100.0],
+        'entry_date': [pd.Timestamp('2020-01-10')],
+        'exit_date': [pd.Timestamp('2020-01-11')],
+        'position_size': [10000.0],
+        'pnl': [100.0],
+        'quantity': [1.0],
+        'is_open': [False],
+        'duration': [1.0]
+    })
+    metrics, _, _ = compute_metrics(1, 'PYRUSDT', df, 24.0)
+    assert metrics['net_profit'] == 100.0
+    assert metrics['avg_bars_win'] == 24.0

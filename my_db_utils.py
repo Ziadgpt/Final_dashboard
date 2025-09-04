@@ -1,10 +1,13 @@
 import sqlite3
 import pandas as pd
 from datetime import datetime
+import os
 
-def init_db():
+def init_db(clear=False):
     """Initialize SQLite database with trades and metrics tables."""
     try:
+        if clear and os.path.exists("portfolio.db"):
+            os.remove("portfolio.db")
         conn = sqlite3.connect("portfolio.db")
         c = conn.cursor()
         c.execute("""

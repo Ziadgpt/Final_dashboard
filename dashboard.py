@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 from reportlab.lib import colors
 import io
@@ -16,19 +15,27 @@ from my_db_utils import init_db, save_trades_to_db, save_metrics_to_db, load_tra
 import os
 from scipy.optimize import minimize
 
+# Enable debug mode (set to False for production to hide debug logs)
+DEBUG_MODE = False
+
 # Page setup
 st.set_page_config(page_title="Quant Rebalance Dashboard", layout="wide", initial_sidebar_state="collapsed")
 st.title("Smart Portfolio Rebalancer")
-st.markdown("Analyze your TradingView backtest with advanced metrics, visuals, and AI-driven insights for 1 to 200 symbols.")
+st.markdown('<div style="padding-bottom: 20px; color: #FFFFFF;">Analyze your TradingView backtest with advanced metrics, visuals, and AI-driven insights for 1 to 200 symbols.</div>', unsafe_allow_html=True)
 
-# Custom CSS for professional look
+# Custom CSS for modern look
 st.markdown("""
     <style>
-    .main {background-color: #1E1E1E; color: #FFFFFF;}
-    .stMetric {background-color: #2A2A2A; padding: 10px; border-radius: 5px;}
-    .stMarkdown h2 {color: #4ECDC4;}
-    .stTable {background-color: #2A2A2A; border-radius: 5px; padding: 10px;}
-    .stTabs {background-color: #2A2A2A; border-radius: 5px;}
+    .main {background-color: #1E1E1E; color: #FFFFFF; padding: 20px;}
+    .stTabs [data-baseweb="tab-list"] {gap: 24px;}
+    .stTabs [data-baseweb="tab"] {height: 60px; font-size: 18px; font-weight: bold; background-color: #2A2A2A; border-radius: 10px; padding: 15px 20px; color: #4ECDC4; transition: all 0.3s;}
+    .stTabs [data-baseweb="tab"]:hover {background-color: #4ECDC4; color: #1E1E1E;}
+    .stTabs [aria-selected="true"] {background-color: #4ECDC4; color: #1E1E1E;}
+    .metric-card {background: linear-gradient(135deg, #2A2A2A 0%, #3A3A3A 100%); padding: 20px; border-radius: 12px; margin: 15px 10px; box-shadow: 0 6px 12px rgba(0,0,0,0.3); transition: transform 0.2s;}
+    .metric-card:hover {transform: scale(1.05);}
+    .metric-title {color: #4ECDC4; font-weight: bold; font-size: 1.1em; margin-bottom: 10px;}
+    .metric-value {color: #FFFFFF; font-size: 1.4em;}
+    .stPlotlyChart {background-color: #1E1E1E; border-radius: 10px; padding: 15px; margin-bottom: 20px;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -37,11 +44,11 @@ try:
     if os.path.exists("logo.png"):
         st.sidebar.image("logo.png", use_container_width=True, caption="Your Logo")
     else:
-        st.sidebar.markdown("**Logo Placeholder** (Add logo.png to directory)")
+        st.sidebar.markdown('<div style="text-align: center; font-weight: bold; color: #4ECDC4;">Logo Placeholder<br>(Add logo.png to directory)</div>', unsafe_allow_html=True)
 except Exception as e:
-    st.sidebar.markdown(f"**Error loading logo**: {str(e)}")
+    st.sidebar.markdown(f'<div style="text-align: center; color: #FF6B6B;">Error loading logo: {str(e)}</div>', unsafe_allow_html=True)
 
-st.sidebar.markdown("**Smart Portfolio Rebalancer**")
+st.sidebar.markdown('<div style="font-size: 1.5em; font-weight: bold; color: #4ECDC4; padding-top: 20px;">Smart Portfolio Rebalancer</div>', unsafe_allow_html=True)
 st.sidebar.markdown("Free tier: Limited to 1000 trades. Upgrade to [SuperGrok](https://x.ai/grok) for unlimited access.")
 st.sidebar.markdown("For API access, visit [x.ai/api](https://x.ai/api).")
 with st.sidebar.expander("Help"):
@@ -49,11 +56,12 @@ with st.sidebar.expander("Help"):
         **How to Use**:
         1. Upload a TradingView backtest Excel file (sheet: 'List of trades').
         2. Select a date range and symbol(s) to filter trades.
-        3. Explore tabs: Performance (metrics, visuals), Risk Insights (correlations, drawdowns), AI Insights (rebalancing, Monte Carlo, anomalies).
+        3. Explore tabs: Metrics (key statistics), Visuals (charts), AI Insights (rebalancing, Monte Carlo, anomalies).
         4. Export results as Excel, CSV, or PDF.
         **Requirements**: Excel must have columns: Trade #, Type, Date/Time, Signal, Price USDT, Position size (qty), Position size (value), Net P&L USDT.
         **Multi-Symbol**: Include a 'Symbol' column for multiple assets.
     """)
+debug_mode = st.sidebar.checkbox("Enable Debug Mode", value=DEBUG_MODE)
 
 # Initialize database
 init_db()
@@ -78,7 +86,8 @@ def excel_serial_to_datetime(value):
 def compute_metrics(portfolio_id: int, symbol: str, trades_df: pd.DataFrame, avg_bars: float):
     try:
         if trades_df.empty:
-            st.warning(f"No trades for symbol={symbol}")
+            if debug_mode:
+                st.write(f"Debug: No trades for symbol={symbol}")
             return None, None, None
 
         for col in ['pnl', 'entry_price', 'exit_price', 'quantity']:
@@ -86,13 +95,17 @@ def compute_metrics(portfolio_id: int, symbol: str, trades_df: pd.DataFrame, avg
         trades_df.dropna(subset=['pnl', 'entry_price', 'exit_price', 'quantity'], inplace=True)
 
         if trades_df.empty:
-            st.warning(f"All trades for symbol={symbol} dropped due to non-numeric values")
+            if debug_mode:
+                st.write(f"Debug: All trades for symbol={symbol} dropped due to non-numeric values")
             return None, None, None
 
         # Debug duration calculation
         trades_df['duration'] = (trades_df['exit_date'] - trades_df['entry_date']).dt.total_seconds() / (24 * 60 * 60)
-        st.write(f"Debug: {symbol} - Mean duration (days) = {trades_df['duration'].mean():.2f}")
-        st.write(f"Debug: {symbol} - Non-zero duration trades = {len(trades_df[trades_df['duration'] > 0])}")
+        if debug_mode:
+            st.write(f"Debug: {symbol} - Mean duration (days) = {trades_df['duration'].mean():.2f}")
+            st.write(f"Debug: {symbol} - Non-zero duration trades = {len(trades_df[trades_df['duration'] > 0])}")
+            st.write(f"Debug: {symbol} - Zero or NaN duration trades = {len(trades_df[trades_df['duration'].isna() | (trades_df['duration'] <= 0)])}")
+            st.write(f"Debug: {symbol} - Sample entry/exit dates: {trades_df[['entry_date', 'exit_date']].head(2).to_dict()}")
 
         open_trades = trades_df[trades_df['is_open']]
         open_pnl = (open_trades['quantity'] * (trades_df['entry_price'].iloc[-1] - open_trades['entry_price'])).sum() if not open_trades.empty else 0
@@ -114,9 +127,10 @@ def compute_metrics(portfolio_id: int, symbol: str, trades_df: pd.DataFrame, avg
         avg_win = gross_profit / winning_trades if winning_trades > 0 else 0
         avg_loss = gross_loss / losing_trades if losing_trades > 0 else 0
         win_loss_ratio = avg_win / abs(avg_loss) if avg_loss != 0 else 0
-        avg_bars_win = closed_trades[closed_trades['pnl'] > 0]['duration'].mean() * 24 if winning_trades > 0 else 0
-        avg_bars_loss = closed_trades[closed_trades['pnl'] < 0]['duration'].mean() * 24 if losing_trades > 0 else 0
-        st.write(f"Debug: {symbol} - Avg bars win = {avg_bars_win:.1f}, Avg bars loss = {avg_bars_loss:.1f}")
+        avg_bars_win = closed_trades[closed_trades['pnl'] > 0]['duration'].mean() * 24 if winning_trades > 0 and not pd.isna(closed_trades[closed_trades['pnl'] > 0]['duration'].mean()) else avg_bars
+        avg_bars_loss = closed_trades[closed_trades['pnl'] < 0]['duration'].mean() * 24 if losing_trades > 0 and not pd.isna(closed_trades[closed_trades['pnl'] < 0]['duration'].mean()) else avg_bars
+        if debug_mode:
+            st.write(f"Debug: {symbol} - Avg bars win = {avg_bars_win:.1f}, Avg bars loss = {avg_bars_loss:.1f}")
         largest_win = closed_trades['pnl'].max() if not closed_trades['pnl'].empty else 0.0
         largest_loss = closed_trades['pnl'].min() if not closed_trades['pnl'].empty else 0.0
         largest_win_pct = (largest_win / equity.iloc[0]) * 100 if largest_win and equity.iloc[0] != 0 else 0
@@ -215,28 +229,34 @@ def portfolio_optimization(returns_df, cov_matrix):
 # File upload with loading spinner
 with st.spinner("Processing uploaded file..."):
     file = st.file_uploader("Upload your backtest Excel", type=["xlsx"])
+
+# Debug logs in an expander
+if debug_mode:
+    with st.expander("Debug Logs"):
+        debug_container = st.container()
+
 if file:
     # Compute file hash to check for changes
     file_hash = hashlib.md5(file.getvalue()).hexdigest()
     portfolio_id = 1  # Hardcoded for now; add user login later
     default_symbol = 'PYRUSDT'  # Default, overridden if Symbol column exists
 
-    # Check if trades exist in DB
-    cached_trades = load_trades_from_db(portfolio_id, default_symbol, file_hash)
-    cached_metrics = load_metrics_from_db(portfolio_id, default_symbol)
-
     # Load sheets
     try:
         xl = pd.ExcelFile(file)
         df = pd.read_excel(file, sheet_name="List of trades", dtype={1: str})
-        st.write(f"Trades loaded: {df.shape[0]} rows, {df.shape[1]} columns")
+        if debug_mode:
+            debug_container.markdown(f'<div style="color: #FFFFFF;">Trades loaded: {df.shape[0]} rows, {df.shape[1]} columns</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div style="color: #FFFFFF;">Trades loaded: {df.shape[0]} rows, {df.shape[1]} columns</div>', unsafe_allow_html=True)
     except Exception as e:
         st.error(f"Error loading Excel file: {str(e)}. Ensure it has a 'List of trades' sheet.")
         st.stop()
 
     # Debug: Show raw column names and sample data
-    st.write("Raw column names:", list(df.columns))
-    st.write("Sample of first 10 rows:", df.head(10))
+    if debug_mode:
+        debug_container.write("Raw column names:", list(df.columns))
+        debug_container.write("Sample of first 10 rows:", df.head(10))
 
     # Dynamically identify columns
     type_col = next((col for col in df.columns if 'type' in col.lower()), df.columns[1] if len(df.columns) > 1 else None)
@@ -250,30 +270,33 @@ if file:
 
     if not all([type_col, trade_num_col, datetime_col, signal_col, price_col, pos_size_col, pnl_col, qty_col]):
         st.error("Missing required columns. Expected: Trade #, Type, Date/Time, Signal, Price USDT, Position size (qty), Position size (value), Net P&L USDT.")
-        st.write("Detected columns:", {"trade_num": trade_num_col, "type": type_col, "datetime": datetime_col,
-                                      "signal": signal_col, "price": price_col, "position_size": pos_size_col,
-                                      "pnl": pnl_col, "quantity": qty_col})
+        if debug_mode:
+            debug_container.write("Detected columns:", {"trade_num": trade_num_col, "type": type_col, "datetime": datetime_col,
+                                                        "signal": signal_col, "price": price_col, "position_size": pos_size_col,
+                                                        "pnl": pnl_col, "quantity": qty_col})
         st.stop()
 
-    st.write(f"Detected columns: trade_num={trade_num_col}, type={type_col}, datetime={datetime_col}, signal={signal_col}, price={price_col}, position_size={pos_size_col}, pnl={pnl_col}, quantity={qty_col}")
-    st.write(f"Unique values in '{type_col}' column:", df[type_col].str.strip().dropna().unique().tolist())
-    st.write(f"Sample Date/Time values:", df[datetime_col].head(10).tolist())
-    st.write(f"Type of Date/Time column:", df[datetime_col].dtype)
+    if debug_mode:
+        debug_container.write(f"Detected columns: trade_num={trade_num_col}, type={type_col}, datetime={datetime_col}, signal={signal_col}, price={price_col}, position_size={pos_size_col}, pnl={pnl_col}, quantity={qty_col}")
+        debug_container.write(f"Unique values in '{type_col}' column:", df[type_col].str.strip().dropna().unique().tolist())
+        debug_container.write(f"Sample Date/Time values:", df[datetime_col].head(10).tolist())
+        debug_container.write(f"Type of Date/Time column:", df[datetime_col].dtype)
 
     # Check for symbol column
     symbol_col = next((col for col in df.columns if 'symbol' in col.lower()), None)
     if symbol_col:
-        st.write(f"Found symbol column: {symbol_col}, unique symbols: {df[symbol_col].unique().tolist()}")
+        if debug_mode:
+            debug_container.write(f"Found symbol column: {symbol_col}, unique symbols: {df[symbol_col].unique().tolist()}")
         symbols = df[symbol_col].unique().tolist()
         default_symbol = df[symbol_col].mode()[0] if not df[symbol_col].empty else 'PYRUSDT'
     else:
-        st.write("No symbol column found. Assuming symbol: PYRUSDT.")
+        st.markdown('<div style="color: #FFFFFF;">No symbol column found. Assuming symbol: PYRUSDT.</div>', unsafe_allow_html=True)
         symbols = ['PYRUSDT']
         default_symbol = 'PYRUSDT'
 
-    # Convert datetime_col to float if it's datetime
-    if df[datetime_col].dtype == 'datetime64[ns]':
-        df[datetime_col] = (df[datetime_col] - pd.Timestamp("1899-12-30")).dt.total_seconds() / 86400
+    # Convert datetime_col to datetime if needed
+    if df[datetime_col].dtype != 'datetime64[ns]':
+        df[datetime_col] = pd.to_datetime(df[datetime_col], errors='coerce')
 
     # Current date for open trades
     current_date = pd.Timestamp(datetime(2025, 9, 4))
@@ -282,7 +305,11 @@ if file:
     trades_list = []
     skipped_trades = []
 
-    if cached_trades.empty:
+    # Load cached trades for all symbols
+    cached_trades_dict = {symbol: load_trades_from_db(portfolio_id, symbol, file_hash) for symbol in symbols}
+    all_cached_empty = all(cached_trades.empty for cached_trades in cached_trades_dict.values())
+
+    if all_cached_empty:
         # Try standard pairing based on type
         type_values = df[type_col].str.strip().str.lower()
         if type_values.str.contains('entry.*long|exit.*long', regex=True, case=False, na=False).any():
@@ -382,21 +409,32 @@ if file:
             trades_df = trades_df[trades_df['duration'] >= 0]
             for symbol in trades_df['symbol'].unique():
                 save_trades_to_db(trades_df[trades_df['symbol'] == symbol], portfolio_id, symbol, file_hash)
+        else:
+            st.error("No valid trades processed. Check your Excel data for correct entry/exit pairing.")
+            if debug_mode and skipped_trades:
+                debug_container.write("Skipped trades (debug info, first 50):", skipped_trades[:50])
+            st.stop()
     else:
-        trades_df = cached_trades
-        trades_df['datetime'] = pd.to_datetime(trades_df['datetime'])
-        trades_df['entry_date'] = pd.to_datetime(trades_df['entry_date'])
-        trades_df['exit_date'] = pd.to_datetime(trades_df['exit_date'])
+        trades_df = pd.concat([cached_trades_dict[symbol] for symbol in symbols if not cached_trades_dict[symbol].empty], ignore_index=True)
+        trades_df['datetime'] = pd.to_datetime(trades_df['datetime'], errors='coerce')
+        trades_df['entry_date'] = pd.to_datetime(trades_df['entry_date'], errors='coerce')
+        trades_df['exit_date'] = pd.to_datetime(trades_df['exit_date'], errors='coerce')
+        trades_df['duration'] = (trades_df['exit_date'] - trades_df['entry_date']).dt.total_seconds() / (24 * 60 * 60)
+        trades_df = trades_df.dropna(subset=['duration', 'entry_date', 'exit_date'])
+        trades_df = trades_df[trades_df['duration'] >= 0]
 
     if trades_df.empty:
         st.error("No valid trades with proper dates found. Check your Excel data.")
-        if skipped_trades:
-            st.write("Skipped trades (debug info, first 50):", skipped_trades[:50])
+        if debug_mode and skipped_trades:
+            debug_container.write("Skipped trades (debug info, first 50):", skipped_trades[:50])
         st.stop()
 
-    st.write(f"Processed trades: {trades_df.shape[0]}")
-    if skipped_trades:
-        st.write("Skipped trades (debug info, first 50):", skipped_trades[:50])
+    if debug_mode:
+        debug_container.markdown(f'<div style="color: #FFFFFF;">Processed trades: {trades_df.shape[0]}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div style="color: #FFFFFF;">Processed trades: {trades_df.shape[0]}</div>', unsafe_allow_html=True)
+    if debug_mode and skipped_trades:
+        debug_container.write("Skipped trades (debug info, first 50):", skipped_trades[:50])
 
     # Load avg_bars
     avg_bars = 0.0
@@ -404,13 +442,22 @@ if file:
         trades_analysis_df = pd.read_excel(file, sheet_name="Trades analysis")
         if 'Avg # bars in trades' in trades_analysis_df.columns:
             avg_bars = float(trades_analysis_df['Avg # bars in trades'].iloc[0])
-            st.write(f"Average Bars in Trade from Excel: {avg_bars:.1f}")
+            if debug_mode:
+                debug_container.markdown(f'<div style="color: #FFFFFF;">Average Bars in Trade from Excel: {avg_bars:.1f}</div>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div style="color: #FFFFFF;">Average Bars in Trade from Excel: {avg_bars:.1f}</div>', unsafe_allow_html=True)
         else:
-            st.write("No 'Avg # bars in trades' found. Using duration-based estimate.")
-            avg_bars = trades_df['duration'].mean() * 24 if not trades_df['duration'].empty else 0.0
+            if debug_mode:
+                debug_container.markdown('<div style="color: #FFFFFF;">No "Avg # bars in trades" found. Using duration-based estimate.</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div style="color: #FFFFFF;">No "Avg # bars in trades" found. Using duration-based estimate.</div>', unsafe_allow_html=True)
+            avg_bars = trades_df['duration'].mean() * 24 if not trades_df['duration'].empty and not pd.isna(trades_df['duration'].mean()) else 10.0
     else:
-        st.write("No Trades analysis sheet found. Using duration-based estimate.")
-        avg_bars = trades_df['duration'].mean() * 24 if not trades_df['duration'].empty else 0.0
+        if debug_mode:
+            debug_container.markdown('<div style="color: #FFFFFF;">No Trades analysis sheet found. Using duration-based estimate.</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div style="color: #FFFFFF;">No Trades analysis sheet found. Using duration-based estimate.</div>', unsafe_allow_html=True)
+        avg_bars = trades_df['duration'].mean() * 24 if not trades_df['duration'].empty and not pd.isna(trades_df['duration'].mean()) else 10.0
 
     # Compute or load metrics for each symbol
     metrics_list = []
@@ -421,7 +468,7 @@ if file:
         if cached_metrics:
             metrics = cached_metrics
             closed_trades = trades_df[trades_df['symbol'] == symbol][~trades_df['is_open']]
-            equity = closed_trades['pnl'].cumsum() + 100000
+            equity = closed_trades['pnl'].cumsum() + 100000 if not closed_trades.empty else pd.Series([100000])
         else:
             metrics, closed_trades, equity = compute_metrics(portfolio_id, symbol, trades_df[trades_df['symbol'] == symbol], avg_bars)
             if not metrics:
@@ -434,115 +481,183 @@ if file:
 
     # Symbol filter
     selected_symbols = st.multiselect("Select symbols", symbols, default=symbols)
+    if not selected_symbols:
+        st.warning("No symbols selected. Please select at least one symbol.")
+        st.stop()
+
     filtered_trades_df = trades_df[trades_df['symbol'].isin(selected_symbols)]
-    filtered_metrics = [m for m in metrics_list if m['symbol'] in selected_symbols]
-    filtered_closed_trades = pd.concat([closed_trades_dict[s] for s in selected_symbols], ignore_index=True)
-    filtered_equity = filtered_closed_trades['pnl'].cumsum() + 100000
+    filtered_metrics = [m for m in metrics_list if m and m['symbol'] in selected_symbols]
+    filtered_closed_trades = pd.concat([closed_trades_dict[s] for s in selected_symbols if not closed_trades_dict[s].empty], ignore_index=True)
+    filtered_equity = filtered_closed_trades['pnl'].cumsum() + 100000 if not filtered_closed_trades.empty else pd.Series([100000])
 
     # Date range filter
-    date_min = trades_df['entry_date'].min() if not trades_df.empty else current_date
-    date_max = trades_df['exit_date'].max() if not trades_df.empty else current_date
-    start_date, end_date = st.date_input("Select date range", [date_min, date_max])
+    date_min = filtered_trades_df['entry_date'].min() if not filtered_trades_df.empty else current_date
+    date_max = filtered_trades_df['exit_date'].max() if not filtered_trades_df.empty else current_date
+    start_date, end_date = st.date_input("Select date range", [date_min, date_max], min_value=date_min, max_value=date_max)
     filtered_trades_df = filtered_trades_df[(filtered_trades_df['entry_date'] >= pd.Timestamp(start_date)) & (filtered_trades_df['exit_date'] <= pd.Timestamp(end_date))]
     filtered_closed_trades = filtered_closed_trades[(filtered_closed_trades['entry_date'] >= pd.Timestamp(start_date)) & (filtered_closed_trades['exit_date'] <= pd.Timestamp(end_date))]
-    filtered_equity = filtered_closed_trades['pnl'].cumsum() + 100000
+    filtered_equity = filtered_closed_trades['pnl'].cumsum() + 100000 if not filtered_closed_trades.empty else pd.Series([100000])
+
+    if filtered_trades_df.empty:
+        st.warning("No trades match the selected date range or symbols. Adjust your filters.")
+        st.stop()
 
     # Tabs for organization
-    tab1, tab2, tab3 = st.tabs(["Performance", "Risk Insights", "AI Insights"])
+    tab1, tab2, tab3 = st.tabs(["Metrics", "Visuals", "AI Insights"])
 
     with tab1:
-        st.subheader("Metrics Summary")
-        metrics_df = pd.DataFrame(filtered_metrics)
-        if not metrics_df.empty:
-            st.dataframe(metrics_df[['symbol', 'net_profit', 'max_drawdown', 'sharpe_ratio', 'sortino_ratio', 'percent_profitable', 'profit_factor']])
+        st.markdown('<h2 style="color: #4ECDC4; padding-bottom: 20px;">Metrics Summary</h2>', unsafe_allow_html=True)
+        if not filtered_metrics:
+            st.markdown('<div style="color: #FFFFFF;">No metrics available for selected symbols.</div>', unsafe_allow_html=True)
         else:
-            st.write("No metrics available for selected symbols.")
+            for metric in filtered_metrics:
+                st.markdown(f'<h3 style="color: #FFFFFF; padding-top: 20px;">{metric["symbol"]}</h3>', unsafe_allow_html=True)
+                cols = st.columns(4)
+                metrics_display = [
+                    ("Net Profit (USDT)", f"${metric['net_profit']:,.2f}"),
+                    ("Max Drawdown (%)", f"{metric['max_drawdown']:.2f}%"),
+                    ("Sharpe Ratio", f"{metric['sharpe_ratio']:.2f}"),
+                    ("Sortino Ratio", f"{metric['sortino_ratio']:.2f}"),
+                    ("Gross Profit (USDT)", f"${metric['gross_profit']:,.2f}"),
+                    ("Gross Loss (USDT)", f"${metric['gross_loss']:,.2f}"),
+                    ("Buy and Hold Return (%)", f"{metric['buy_hold_return']:.2f}%"),
+                    ("Max Run-up (USDT)", f"${metric['max_runup']:,.2f}"),
+                    ("Total Trades", f"{metric['total_trades']}"),
+                    ("Winning Trades", f"{metric['winning_trades']}"),
+                    ("Losing Trades", f"{metric['losing_trades']}"),
+                    ("Percent Profitable (%)", f"{metric['percent_profitable']:.2f}%"),
+                    ("Average PnL (USDT)", f"${metric['avg_pnl']:,.2f}"),
+                    ("Average Win (USDT)", f"${metric['avg_win']:,.2f}"),
+                    ("Average Loss (USDT)", f"${metric['avg_loss']:,.2f}"),
+                    ("Win/Loss Ratio", f"{metric['win_loss_ratio']:.2f}"),
+                    ("Average Bars in Trade", f"{metric['avg_bars']:.1f}"),
+                    ("Average Bars in Winning Trades", f"{metric['avg_bars_win']:.1f}"),
+                    ("Average Bars in Losing Trades", f"{metric['avg_bars_loss']:.1f}"),
+                    ("Largest Win (USDT)", f"${metric['largest_win']:,.2f}"),
+                    ("Largest Loss (USDT)", f"${metric['largest_loss']:,.2f}"),
+                    ("Largest Win (%)", f"{metric['largest_win_pct']:.2f}%"),
+                    ("Largest Loss (%)", f"{metric['largest_loss_pct']:.2f}%"),
+                    ("Profit Factor", f"{metric['profit_factor']:.2f}"),
+                    ("Margin Calls", f"{metric['margin_calls']}"),
+                    ("Open PnL (USDT)", f"${metric['open_pnl']:,.2f}"),
+                    ("Total Open Trades", f"{metric['total_open_trades']}")
+                ]
+                for i, (label, value) in enumerate(metrics_display):
+                    with cols[i % 4]:
+                        st.markdown(f"""
+                            <div class="metric-card">
+                                <div class="metric-title">{label}</div>
+                                <div class="metric-value">{value}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
 
-        st.subheader("Performance Visuals")
+    with tab2:
+        st.markdown('<h2 style="color: #4ECDC4; padding-bottom: 20px;">Performance Visuals</h2>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("**Portfolio Weights**")
+            st.markdown('<div style="color: #FFFFFF; padding-bottom: 10px;">Portfolio Weights</div>', unsafe_allow_html=True)
             weights = filtered_trades_df.groupby("symbol")["position_size"].sum()
             weights = weights / weights.sum() if weights.sum() != 0 else weights
             fig = px.pie(values=weights.values, names=weights.index, title="Portfolio Allocation",
                          color_discrete_sequence=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4'])
+            fig.update_traces(hovertemplate='%{label}: $%{value:.2f} (%{percent})', textinfo='percent+label')
             fig.update_layout(paper_bgcolor="#1E1E1E", font_color="#FFFFFF", title_font_color="#FFFFFF")
             st.plotly_chart(fig, use_container_width=True)
 
         with col2:
-            st.markdown("**PnL by Symbol**")
+            st.markdown('<div style="color: #FFFFFF; padding-bottom: 10px;">PnL by Symbol</div>', unsafe_allow_html=True)
             pnl_by_symbol = filtered_closed_trades.groupby("symbol")['pnl'].sum()
             fig = go.Figure(data=[
-                go.Bar(x=pnl_by_symbol.index, y=pnl_by_symbol.values, marker_color='#4ECDC4')
+                go.Bar(x=pnl_by_symbol.index, y=pnl_by_symbol.values, marker_color='#4ECDC4', hovertemplate='%{x}: $%{y:.2f}<br>')
             ])
             fig.update_layout(title="PnL by Symbol", xaxis_title="Symbol", yaxis_title="PnL (USDT)",
                               paper_bgcolor="#1E1E1E", plot_bgcolor="#1E1E1E", font_color="#FFFFFF",
                               title_font_color="#FFFFFF", yaxis_gridcolor="#555555")
             st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("**Cumulative PnL Over Time**")
+        st.markdown('<div style="color: #FFFFFF; padding-bottom: 10px;">Cumulative PnL Over Time</div>', unsafe_allow_html=True)
         dates = filtered_closed_trades['exit_date'] if not filtered_closed_trades.empty else [current_date] * len(filtered_equity)
         step = max(1, len(dates) // 50)
         downsampled_dates = dates[::step][:len(filtered_equity[::step])]
         downsampled_equity = filtered_equity[::step]
         fig = go.Figure(data=[
-            go.Scatter(x=downsampled_dates, y=downsampled_equity, mode='lines', line=dict(color='#4ECDC4'))
+            go.Scatter(x=downsampled_dates, y=downsampled_equity, mode='lines', line=dict(color='#4ECDC4'), hovertemplate='Date: %{x}<br>Equity: $%{y:.2f}<br>')
         ])
         fig.update_layout(title="Cumulative PnL", xaxis_title="Date", yaxis_title="Equity (USDT)",
                           paper_bgcolor="#1E1E1E", plot_bgcolor="#1E1E1E", font_color="#FFFFFF",
                           title_font_color="#FFFFFF", xaxis_gridcolor="#555555", yaxis_gridcolor="#555555")
         st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("**PnL Distribution**")
+        st.markdown('<div style="color: #FFFFFF; padding-bottom: 10px;">PnL Distribution</div>', unsafe_allow_html=True)
         fig = px.histogram(filtered_closed_trades, x='pnl', nbins=50, title="PnL Distribution", color_discrete_sequence=['#4ECDC4'])
         fig.add_vline(x=filtered_closed_trades['pnl'].mean(), line_dash="dash", line_color="#FF6B6B", annotation_text="Avg PnL")
+        fig.update_traces(hovertemplate='PnL: $%{x:.2f}<br>Count: %{y}<br>')
         fig.update_layout(paper_bgcolor="#1E1E1E", plot_bgcolor="#1E1E1E", font_color="#FFFFFF",
                           title_font_color="#FFFFFF", xaxis_gridcolor="#555555", yaxis_gridcolor="#555555")
         st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("**Position Size Treemap**")
+        st.markdown('<div style="color: #FFFFFF; padding-bottom: 10px;">Position Size Treemap</div>', unsafe_allow_html=True)
         fig = px.treemap(filtered_trades_df, path=['symbol'], values='position_size', title="Position Size Allocation")
+        fig.update_traces(hovertemplate='%{label}: $%{value:.2f}<br>')
         fig.update_layout(paper_bgcolor="#1E1E1E", font_color="#FFFFFF", title_font_color="#FFFFFF")
         st.plotly_chart(fig, use_container_width=True)
 
-    with tab2:
-        st.subheader("Risk Insights")
+        st.markdown('<div style="color: #FFFFFF; padding-bottom: 10px;">Correlation Matrix</div>', unsafe_allow_html=True)
         pivot = filtered_trades_df.pivot_table(index="entry_date", columns="symbol", values="pnl", aggfunc='first').fillna(0)
         corr = pivot.corr()
         fig = px.imshow(corr, title="Correlation Matrix", color_continuous_scale='RdBu', range_color=[-1, 1])
+        fig.update_traces(hovertemplate='%{x} vs %{y}: %{z:.2f}<br>')
         fig.update_layout(paper_bgcolor="#1E1E1E", font_color="#FFFFFF", title_font_color="#FFFFFF")
         st.plotly_chart(fig, use_container_width=True)
-        if len(corr) > 1:
-            high_corr = corr.where(np.triu(np.ones(corr.shape), k=1).astype(bool)).stack().sort_values(ascending=False)
-            if not high_corr.empty and high_corr.iloc[0] > 0.7:
-                pair = high_corr.index[0]
-                st.caption(f"⚠️ High correlation between {pair[0]} and {pair[1]} ({high_corr.iloc[0]:.2f}). Consider reducing one.")
-        else:
-            st.caption(f"No significant correlations (single asset: {default_symbol}).")
 
-        st.markdown("**Drawdown Distribution**")
+        st.markdown('<div style="color: #FFFFFF; padding-bottom: 10px;">Drawdown Distribution</div>', unsafe_allow_html=True)
         daily_equity = filtered_closed_trades.groupby(filtered_closed_trades['exit_date'].dt.date)['pnl'].sum().cumsum() + 100000
         daily_drawdowns = ((daily_equity.cummax() - daily_equity) / daily_equity.cummax()) * 100
         fig = px.box(y=daily_drawdowns, title="Daily Drawdown Distribution", color_discrete_sequence=['#FF6B6B'])
         fig.add_hline(y=metrics_list[0]['max_drawdown'] if metrics_list else 0, line_dash="dash", line_color="#4ECDC4", annotation_text="Max Drawdown")
+        fig.update_traces(hovertemplate='Drawdown: %{y:.2f}%<br>')
         fig.update_layout(paper_bgcolor="#1E1E1E", plot_bgcolor="#1E1E1E", font_color="#FFFFFF",
                           title_font_color="#FFFFFF", yaxis_gridcolor="#555555")
         st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("**Rolling Sharpe Ratio**")
+        st.markdown('<div style="color: #FFFFFF; padding-bottom: 10px;">Rolling Sharpe Ratio</div>', unsafe_allow_html=True)
         returns = filtered_closed_trades['pnl'] / filtered_closed_trades['quantity'].mean() if filtered_closed_trades['quantity'].mean() != 0 else pd.Series([0] * len(filtered_closed_trades))
         rolling_sharpe = compute_rolling_sharpe(returns)
         fig = go.Figure(data=[
-            go.Scatter(x=filtered_closed_trades['exit_date'], y=rolling_sharpe, mode='lines', line=dict(color='#4ECDC4'))
+            go.Scatter(x=filtered_closed_trades['exit_date'], y=rolling_sharpe, mode='lines', line=dict(color='#4ECDC4'), hovertemplate='Date: %{x}<br>Sharpe: %{y:.2f}<br>')
         ])
         fig.update_layout(title="30-Day Rolling Sharpe Ratio", xaxis_title="Date", yaxis_title="Sharpe Ratio",
                           paper_bgcolor="#1E1E1E", plot_bgcolor="#1E1E1E", font_color="#FFFFFF",
                           title_font_color="#FFFFFF", xaxis_gridcolor="#555555", yaxis_gridcolor="#555555")
         st.plotly_chart(fig, use_container_width=True)
 
+        st.markdown('<div style="color: #FFFFFF; padding-bottom: 10px;">Candlestick Chart (Price Trends)</div>', unsafe_allow_html=True)
+        for symbol in selected_symbols:
+            symbol_trades = filtered_trades_df[filtered_trades_df['symbol'] == symbol]
+            if not symbol_trades.empty:
+                fig = go.Figure(data=[
+                    go.Candlestick(
+                        x=symbol_trades['entry_date'],
+                        open=symbol_trades['entry_price'],
+                        high=symbol_trades[['entry_price', 'exit_price']].max(axis=1),
+                        low=symbol_trades[['entry_price', 'exit_price']].min(axis=1),
+                        close=symbol_trades['exit_price'],
+                        hoverinfo='x+y+text',
+                        text=[f'Open: ${o:.2f}<br>High: ${h:.2f}<br>Low: ${l:.2f}<br>Close: ${c:.2f}'
+                              for o, h, l, c in zip(symbol_trades['entry_price'],
+                                                    symbol_trades[['entry_price', 'exit_price']].max(axis=1),
+                                                    symbol_trades[['entry_price', 'exit_price']].min(axis=1),
+                                                    symbol_trades['exit_price'])]
+                    )
+                ])
+                fig.update_layout(title=f"Price Trends for {symbol}", xaxis_title="Date", yaxis_title="Price (USDT)",
+                                  paper_bgcolor="#1E1E1E", plot_bgcolor="#1E1E1E", font_color="#FFFFFF",
+                                  title_font_color="#FFFFFF", xaxis_gridcolor="#555555", yaxis_gridcolor="#555555")
+                st.plotly_chart(fig, use_container_width=True)
+
     with tab3:
-        st.subheader("AI Insights")
-        st.markdown("**Rebalancing Suggestion**")
+        st.markdown('<h2 style="color: #4ECDC4; padding-bottom: 20px;">AI Insights</h2>', unsafe_allow_html=True)
+        st.markdown('<div style="color: #FFFFFF; padding-bottom: 10px;">Rebalancing Suggestion</div>', unsafe_allow_html=True)
         returns = filtered_trades_df.groupby("symbol")["pnl"].mean()
         vols = filtered_trades_df.groupby("symbol")["pnl"].std()
         sharpes = returns / vols
@@ -550,74 +665,75 @@ if file:
             best = sharpes.idxmax()
             worst = sharpes.idxmin()
             if sharpes[best] - sharpes[worst] > 0.5:
-                st.write(f"**Insight**: Trim {worst} by 10-15% and add to {best}. Last 10 trades suggest {best} reduces risk while maintaining returns.")
+                st.markdown(f'<div style="color: #FFFFFF;"><strong>Insight</strong>: Trim {worst} by 10-15% and add to {best}. Last 10 trades suggest {best} reduces risk while maintaining returns.</div>', unsafe_allow_html=True)
             else:
-                st.write("**Insight**: Portfolio looks balanced. No major rebalancing needed.")
+                st.markdown('<div style="color: #FFFFFF;"><strong>Insight</strong>: Portfolio looks balanced. No major rebalancing needed.</div>', unsafe_allow_html=True)
         else:
-            st.write(f"**Insight**: Only one asset ({default_symbol}) detected. Add more assets for rebalancing insights.")
+            st.markdown(f'<div style="color: #FFFFFF;"><strong>Insight</strong>: Only one asset ({default_symbol}) detected. Add more assets for rebalancing insights.</div>', unsafe_allow_html=True)
 
-        st.markdown("**Portfolio Optimization (Markowitz)**")
+        st.markdown('<div style="color: #FFFFFF; padding-bottom: 10px;">Portfolio Optimization (Markowitz)</div>', unsafe_allow_html=True)
         if len(selected_symbols) > 1:
             returns_df = filtered_trades_df.pivot_table(index="entry_date", columns="symbol", values="pnl", aggfunc='first').fillna(0)
             cov_matrix = returns_df.cov()
             optimal_weights = portfolio_optimization(returns_df, cov_matrix)
             weights_df = pd.DataFrame({'Symbol': selected_symbols, 'Optimal Weight': optimal_weights})
-            st.write("**Insight**: Optimal portfolio weights to maximize Sharpe ratio:")
+            st.markdown('<div style="color: #FFFFFF;"><strong>Insight</strong>: Optimal portfolio weights to maximize Sharpe ratio:</div>', unsafe_allow_html=True)
             st.dataframe(weights_df)
             fig = px.pie(weights_df, values='Optimal Weight', names='Symbol', title="Optimal Portfolio Allocation")
+            fig.update_traces(hovertemplate='%{label}: %{value:.2%}<br>')
             fig.update_layout(paper_bgcolor="#1E1E1E", font_color="#FFFFFF", title_font_color="#FFFFFF")
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.write("**Insight**: Portfolio optimization requires multiple assets.")
+            st.markdown('<div style="color: #FFFFFF;"><strong>Insight</strong>: Portfolio optimization requires multiple assets.</div>', unsafe_allow_html=True)
 
-        st.markdown("**Monte Carlo Risk Forecast**")
+        st.markdown('<div style="color: #FFFFFF; padding-bottom: 10px;">Monte Carlo Risk Forecast</div>', unsafe_allow_html=True)
         with st.spinner("Running Monte Carlo simulation..."):
             if st.button("Run Monte Carlo Simulation"):
                 returns = filtered_closed_trades['pnl'] / filtered_closed_trades['quantity'].mean() if filtered_closed_trades['quantity'].mean() != 0 else pd.Series([0])
                 paths, percentiles = monte_carlo_simulation(returns, initial_equity=filtered_equity.iloc[-1] if not filtered_equity.empty else 100000)
                 fig = go.Figure()
                 for path in paths.T[:50]:
-                    fig.add_trace(go.Scatter(x=list(range(30)), y=path, mode='lines', line=dict(color='#4ECDC4', width=0.5), opacity=0.1))
-                fig.add_trace(go.Scatter(x=list(range(30)), y=percentiles[1], mode='lines', line=dict(color='#FF6B6B'), name='Median'))
-                fig.add_trace(go.Scatter(x=list(range(30)), y=percentiles[2], mode='lines', line=dict(color='#45B7D1', dash='dash'), name='95th Percentile'))
+                    fig.add_trace(go.Scatter(x=list(range(30)), y=path, mode='lines', line=dict(color='#4ECDC4', width=0.5), opacity=0.1, hovertemplate='Day: %{x}<br>Equity: $%{y:.2f}<br>'))
+                fig.add_trace(go.Scatter(x=list(range(30)), y=percentiles[1], mode='lines', line=dict(color='#FF6B6B'), name='Median', hovertemplate='Day: %{x}<br>Median: $%{y:.2f}<br>'))
+                fig.add_trace(go.Scatter(x=list(range(30)), y=percentiles[2], mode='lines', line=dict(color='#45B7D1', dash='dash'), name='95th Percentile', hovertemplate='Day: %{x}<br>95th: $%{y:.2f}<br>'))
                 fig.add_trace(go.Scatter(x=list(range(30)), y=percentiles[0], mode='lines', line=dict(color='#45B7D1', dash='dash'), name='5th Percentile',
-                                         fill='tonexty', fillcolor='rgba(69, 183, 209, 0.2)'))
+                                         hovertemplate='Day: %{x}<br>5th: $%{y:.2f}<br>', fill='tonexty', fillcolor='rgba(69, 183, 209, 0.2)'))
                 fig.update_layout(title="Monte Carlo Simulation (30 Days)", xaxis_title="Days", yaxis_title="Equity (USDT)",
                                   paper_bgcolor="#1E1E1E", plot_bgcolor="#1E1E1E", font_color="#FFFFFF",
                                   title_font_color="#FFFFFF", xaxis_gridcolor="#555555", yaxis_gridcolor="#555555")
                 st.plotly_chart(fig, use_container_width=True)
                 var_5 = filtered_equity.iloc[-1] - percentiles[0][-1]
-                st.write(f"**Insight**: 5% chance of losing more than ${var_5:,.2f} in 30 days (95% VaR).")
+                st.markdown(f'<div style="color: #FFFFFF;"><strong>Insight</strong>: 5% chance of losing more than ${var_5:,.2f} in 30 days (95% VaR).</div>', unsafe_allow_html=True)
 
-        st.markdown("**Anomaly Detection**")
+        st.markdown('<div style="color: #FFFFFF; padding-bottom: 10px;">Anomaly Detection</div>', unsafe_allow_html=True)
         iso_forest = IsolationForest(contamination=0.05, random_state=42)
         anomalies = iso_forest.fit_predict(filtered_trades_df[['pnl', 'duration']])
         filtered_trades_df['is_anomaly'] = anomalies == -1
         if filtered_trades_df['is_anomaly'].sum() > 0:
-            st.write(f"**Insight**: {filtered_trades_df['is_anomaly'].sum()} anomalous trades detected (e.g., extreme PnL or duration).")
+            st.markdown(f'<div style="color: #FFFFFF;"><strong>Insight</strong>: {filtered_trades_df["is_anomaly"].sum()} anomalous trades detected (e.g., extreme PnL or duration).</div>', unsafe_allow_html=True)
             st.dataframe(filtered_trades_df[filtered_trades_df['is_anomaly']][['entry_date', 'pnl', 'duration', 'symbol']])
         else:
-            st.write("**Insight**: No anomalous trades detected.")
+            st.markdown('<div style="color: #FFFFFF;"><strong>Insight</strong>: No anomalous trades detected.</div>', unsafe_allow_html=True)
 
-        st.markdown("**Kelly Criterion Position Sizing**")
+        st.markdown('<div style="color: #FFFFFF; padding-bottom: 10px;">Kelly Criterion Position Sizing</div>', unsafe_allow_html=True)
         if filtered_metrics:
             p = filtered_metrics[0]['percent_profitable'] / 100
             b = filtered_metrics[0]['avg_win'] / abs(filtered_metrics[0]['avg_loss']) if filtered_metrics[0]['avg_loss'] != 0 else 1
             kelly_fraction = (p - (1 - p) / b) if b != 0 else 0
             if kelly_fraction > 0:
-                st.write(f"**Insight**: Kelly Criterion suggests allocating {kelly_fraction:.2%} of capital per trade to maximize growth.")
+                st.markdown(f'<div style="color: #FFFFFF;"><strong>Insight</strong>: Kelly Criterion suggests allocating {kelly_fraction:.2%} of capital per trade to maximize growth.</div>', unsafe_allow_html=True)
             else:
-                st.write("**Insight**: Kelly Criterion not applicable (insufficient win/loss data).")
+                st.markdown('<div style="color: #FFFFFF;"><strong>Insight</strong>: Kelly Criterion not applicable (insufficient win/loss data).</div>', unsafe_allow_html=True)
 
-        st.markdown("**Predicted Next Drawdown**")
+        st.markdown('<div style="color: #FFFFFF; padding-bottom: 10px;">Predicted Next Drawdown</div>', unsafe_allow_html=True)
         pred, error = predict_drawdown(filtered_trades_df)
         if error:
-            st.write(f"**Insight**: {error}")
+            st.markdown(f'<div style="color: #FFFFFF;"><strong>Insight</strong>: {error}</div>', unsafe_allow_html=True)
         else:
-            st.write(f"**Insight**: Next trade predicted PnL (drawdown risk): ${pred:,.2f} (based on historical patterns).")
+            st.markdown(f'<div style="color: #FFFFFF;"><strong>Insight</strong>: Next trade predicted PnL (drawdown risk): ${pred:,.2f} (based on historical patterns).</div>', unsafe_allow_html=True)
 
     # Export options
-    st.subheader("Export Report")
+    st.markdown('<h2 style="color: #4ECDC4; padding-top: 20px;">Export Report</h2>', unsafe_allow_html=True)
     export_format = st.selectbox("Choose format", ["Excel", "CSV", "PDF"])
     if st.button("Generate Report"):
         if export_format == "Excel":
@@ -632,13 +748,6 @@ if file:
             buffer = io.BytesIO()
             doc = SimpleDocTemplate(buffer, pagesize=letter)
             elements = []
-            c = canvas.Canvas(buffer, pagesize=letter)
-            c.setFont("Helvetica-Bold", 14)
-            c.drawString(100, 750, f"Portfolio Rebalance Report for {', '.join(selected_symbols)}")
-            c.setFont("Helvetica", 12)
-            c.drawString(100, 730, f"Generated: {datetime.now().strftime('%Y-%m-%d')}")
-            c.showPage()
-            c.save()
             table_data = [["Symbol", "Metric", "Value"]] + [
                 [m['symbol'], label, value] for m in filtered_metrics for label, value in [
                     ("Net Profit (USDT)", f"${m['net_profit']:,.2f}"),
