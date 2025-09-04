@@ -1,9 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
-from reportlab.lib import colors
 import io
 from datetime import datetime, timedelta
 import plotly.express as px
@@ -57,7 +54,7 @@ with st.sidebar.expander("Help"):
         1. Upload a TradingView backtest Excel file (sheet: 'List of trades').
         2. Select a date range and symbol(s) to filter trades.
         3. Explore tabs: Metrics (key statistics), Visuals (charts), AI Insights (rebalancing, Monte Carlo, anomalies).
-        4. Export results as Excel, CSV, or PDF.
+        4. Export results as Excel, CSV, or PDF (PDF requires 'reportlab' library, install via 'pip install reportlab').
         **Requirements**: Excel must have columns: Trade #, Type, Date/Time, Signal, Price USDT, Position size (qty), Position size (value), Net P&L USDT.
         **Multi-Symbol**: Include a 'Symbol' column for multiple assets.
     """)
@@ -476,13 +473,13 @@ else:
             if debug_mode:
                 debug_container.markdown('<div style="color: #FFFFFF;">No "Avg # bars in trades" found. Using duration-based estimate.</div>', unsafe_allow_html=True)
             else:
-                st.markdown('<div style="color: #FFFFFF;">No "Avg # bars in trades" found. Using duration-based estimate.</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="color: #FFFFFF;">No "Avg # bars in trades" found. Using duration-based estimate.</div>', unsafe_allow_html=True)
             avg_bars = trades_df['duration'].mean() * 24 if not trades_df['duration'].empty and not pd.isna(trades_df['duration'].mean()) else 10.0
     else:
         if debug_mode:
             debug_container.markdown('<div style="color: #FFFFFF;">No Trades analysis sheet found. Using duration-based estimate.</div>', unsafe_allow_html=True)
         else:
-            st.markdown('<div style="color: #FFFFFF;">No Trades analysis sheet found. Using duration-based estimate.</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="color: #FFFFFF;">No Trades analysis sheet found. Using duration-based estimate.</div>', unsafe_allow_html=True)
         avg_bars = trades_df['duration'].mean() * 24 if not trades_df['duration'].empty and not pd.isna(trades_df['duration'].mean()) else 10.0
 
     # Compute or load metrics for each symbol
@@ -700,7 +697,7 @@ else:
                 if sharpes[best] - sharpes[worst] > 0.5:
                     st.markdown(f'<div style="color: #FFFFFF;"><strong>Insight</strong>: Trim {worst} by 10-15% and add to {best}. Last 10 trades suggest {best} reduces risk while maintaining returns.</div>', unsafe_allow_html=True)
                 else:
-                    st.markdown('<div style="color: #FFFFFF;"><strong>Insight</strong>: Portfolio looks balanced. No major rebalancing needed.</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="color: #FFFFFF;"><strong>Insight</strong>: Portfolio looks balanced. No major rebalancing needed.</div>', unsafe_allow_html=True)
             else:
                 st.markdown(f'<div style="color: #FFFFFF;"><strong>Insight</strong>: Only one asset ({default_symbol}) detected. Add more assets for rebalancing insights.</div>', unsafe_allow_html=True)
 
@@ -762,7 +759,7 @@ else:
                 if kelly_fraction > 0:
                     st.markdown(f'<div style="color: #FFFFFF;"><strong>Insight</strong>: Kelly Criterion suggests allocating {kelly_fraction:.2%} of capital per trade to maximize growth.</div>', unsafe_allow_html=True)
                 else:
-                    st.markdown('<div style="color: #FFFFFF;"><strong>Insight</strong>: Kelly Criterion not applicable (insufficient win/loss data).</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="color: #FFFFFF;"><strong>Insight</strong>: Kelly Criterion not applicable (insufficient win/loss data).</div>', unsafe_allow_html=True)
 
             st.markdown('<div style="color: #FFFFFF; padding-bottom: 10px;">Predicted Next Drawdown</div>', unsafe_allow_html=True)
             pred, error = predict_drawdown(filtered_trades_df)
@@ -776,7 +773,17 @@ else:
     # Export options
     st.markdown('<h2 style="color: #4ECDC4; padding-top: 20px;">Export Report</h2>', unsafe_allow_html=True)
     try:
-        export_format = st.selectbox("Choose format", ["Excel", "CSV", "PDF"])
+        export_options = ["Excel", "CSV"]
+        try:
+            from reportlab.lib.pagesizes import letter
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+            from reportlab.lib import colors
+            export_options.append("PDF")
+        except ImportError:
+            st.warning("PDF export is disabled because 'reportlab' is not installed. Install it with 'pip install reportlab'.")
+            letter, SimpleDocTemplate, Table, TableStyle, colors = None, None, None, None, None
+
+        export_format = st.selectbox("Choose format", export_options)
         if st.button("Generate Report"):
             if export_format == "Excel":
                 buffer = io.BytesIO()
@@ -786,7 +793,7 @@ else:
                 buffer = io.StringIO()
                 filtered_trades_df.to_csv(buffer, index=False)
                 st.download_button("Download CSV", buffer.getvalue(), "report.csv")
-            else:  # PDF
+            elif export_format == "PDF" and letter is not None:
                 buffer = io.BytesIO()
                 doc = SimpleDocTemplate(buffer, pagesize=letter)
                 elements = []
@@ -838,5 +845,7 @@ else:
                 elements.append(table)
                 doc.build(elements)
                 st.download_button("Download PDF", buffer.getvalue(), "report.pdf")
+            else:
+                st.error("PDF export is not available because 'reportlab' is not installed.")
     except Exception as e:
         st.error(f"Error generating report: {str(e)}")
